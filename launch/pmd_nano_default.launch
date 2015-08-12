@@ -1,0 +1,7 @@
+<launch>
+  <param name="ppp" type="str" value="$(find pmd_nano)/launch/camboardnanoproc.L64.ppp" />
+  <param name="pap" type="str" value="$(find pmd_nano)/launch/camboardnano.L64.pap" />
+  <node name="pmd_nano_publisher" pkg="pmd_nano" type="pmd_nano_publisher" output="screen"/>
+<!--  <node name="pmd_nano_image_subscriber" pkg="pmd_nano" type="pmd_nano_image_subscriber" /> -->
+<!--  <node name="pmd_nano_cloud_subscriber" pkg="pmd_nano" type="pmd_nano_cloud_subscriber" /> -->
+</launch>

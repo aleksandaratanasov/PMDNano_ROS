@@ -1,0 +1,100 @@
+#include <ros/ros.h>
+#include <string>
+#include <memory>
+#include <opencv2/core/core.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <pcl/visualization/cloud_viewer.h>
+#include <pcl_ros/point_cloud.h>
+//#include <sensor_msgs/point_cloud_conversion.h>
+#include <pcl/point_types.h>
+#include <image_transport/image_transport.h>
+#include <cv_bridge/cv_bridge.h>
+#include "../include/pmd_nano/PMDNano.h"
+
+/*
+ * FIXME:
+ *  - published images of depth and amplitude look like crap; implement a version of ROS Image that can handle CV_32F
+ * TODO:
+ *  - add publishing of the cloud produced by the PMD device
+ *  - (optimization) see if PMDs output image can be directly converted into ROS image instead of going through the OpenCV step or at least if the data block (pixel information)
+ * can be just passed along the way from one format to another
+ */
+
+using std::string;
+
+int main(int argc, char* argv[]) {
+  ros::init(argc, argv, "pmd_nano_publisher");
+  ros::NodeHandle nh;
+
+// ppp_file = "camboardnanoproc.L64.ppp", pap_file = "camboardnano.L64.pap";
+// for easier use call pmd_nano_default.launch (the ppp and pap files are in the launch directory)
+  string ppp_file = "", pap_file = "";
+  nh.getParam("ppp", ppp_file);
+  nh.getParam("pap", pap_file);
+
+  ROS_INFO_STREAM("Loaded ppp file: " << ppp_file);
+  ROS_INFO_STREAM("Loaded pap file: " << pap_file);
+
+  ROS_INFO("Connecting to camera");
+  std::shared_ptr<DepthCamera> camera(new PMDNano(pap_file, ppp_file));
+  camera->start();
+
+  cv::Mat depth = cv::Mat::zeros(camera->depthSize(), CV_32F);
+  cv::Mat amplitude = cv::Mat::zeros(camera->depthSize(), CV_32F);
+//  std::shared_ptr<pcl::visualization::CloudViewer> viewer(new pcl::visualization::CloudViewer("Vertex"));
+  PointCloud::Ptr cloud(new PointCloud(camera->depthSize().width, camera->depthSize().height));
+
+  ROS_INFO_STREAM("DEPTH: " << camera->depthSize().width << " by " << camera->depthSize().height);
+
+  // Creating publishers for depth and amplitude images
+  image_transport::ImageTransport imgTransportDepth(nh), imgTransportAmplitude(nh);
+  image_transport::Publisher pubDepth = imgTransportDepth.advertise("pmd_nano/depth", 1);
+  image_transport::Publisher pubAmplitude = imgTransportAmplitude.advertise("pmd_nano/amplitude", 1);
+
+  // Creating a publisher for the point cloud
+  ros::Publisher pubCloud = nh.advertise<PointCloud> ("pmd_nano/cloud", 10);
+
+  double rate = 40;
+  ROS_INFO_STREAM("Setting rate to " << rate);
+  ros::Rate r(rate);
+
+  while (nh.ok()) {
+      ROS_INFO("Capturing new data");
+      camera->captureDepth(depth);
+      camera->captureAmplitude(amplitude);
+      camera->capturePointCloud(cloud);
+
+      ROS_INFO("Flipping retrieved data");
+      cv::flip(depth, depth, 0);
+      cv::flip(amplitude, amplitude, 0);
+
+      cv::Mat a;
+      amplitude.convertTo(a, CV_8U, 255.0 / 1000.0);
+      // Publish depth and aplitude images
+      // Major problem here - we have CV_32F and there is no such encoding available in cv_bridge (goes up to 16bit data structures)
+      sensor_msgs::ImagePtr depthMsg = cv_bridge::CvImage(std_msgs::Header(), "mono16", depth).toImageMsg();
+      sensor_msgs::ImagePtr amplitudeMsg = cv_bridge::CvImage(std_msgs::Header(), "mono8", amplitude).toImageMsg();
+//      sensor_msgs::PointCloud2 cloudMsg;
+
+      pubDepth.publish(depthMsg);
+      pubAmplitude.publish(amplitudeMsg);
+      //cloud->header.stamp = ros::Time::now().toNSec();
+      //ROS_INFO_STREAM("Cloud publish time stamp: " << cloud->header.stamp);
+
+      pubCloud.publish(cloud);
+
+
+//      ROS_INFO("Displaying data");
+      // Just to see the way OpenCV displays the image before it's converted to ROS Image and published
+//      cv::imshow("Depth", depth); // Hmmmmmm, this doesn't show at all....
+//      cv::waitKey(10);
+//      cv::imshow("Amplitude", a);
+//      viewer->showCloud(cloud);
+
+      ros::spinOnce();
+      r.sleep();
+  }
+
+  return 0;
+}
